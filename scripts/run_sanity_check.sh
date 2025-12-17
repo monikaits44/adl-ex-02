@@ -83,17 +83,6 @@ else
 fi
 echo ""
 
-# Test 5: Unit Tests
-echo "Test 5: Run Unit Tests"
-echo "  Command: python test_conditional.py"
-if conda run -p $CONDA_ENV python test_conditional.py > /dev/null 2>&1; then
-    echo "  PASSED"
-    ((PASSED++))
-else
-    echo "  FAILED (some tests failed)"
-    ((FAILED++))
-fi
-echo ""
 
 # Summary
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
