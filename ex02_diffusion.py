@@ -132,11 +132,11 @@ class Diffusion:
             noise = torch.randn_like(x)
             return model_mean + torch.sqrt(posterior_variance_t) * noise
 
-    # Algorithm 2 (including returning all images)
     @torch.no_grad()
     def sample(self, model, image_size, batch_size=16, channels=3, classes=None, guidance_scale=0.0):
         """
-        Full reverse diffusion sampling loop.
+        Algorithm 2: Sampling from DDPM paper - reverse diffusion process.
+        Generates images by iteratively denoising from pure noise x_T to clean image x_0.
         
         Args:
             model: The denoising model
@@ -145,6 +145,9 @@ class Diffusion:
             channels: Number of color channels
             classes: Class labels [B] for conditional generation, or None for unconditional
             guidance_scale: Strength of classifier-free guidance (0 = no guidance, typical: 3-7)
+        
+        Returns:
+            Generated images [B, C, H, W] in range [-1, 1]
         """
         model.eval()
         x = torch.randn((batch_size, channels, image_size, image_size), device=self.device)
