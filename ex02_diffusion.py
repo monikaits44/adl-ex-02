@@ -9,6 +9,8 @@ def linear_beta_schedule(beta_start, beta_end, timesteps):
     """
     standard linear beta/variance schedule as proposed in the original paper
     """
+    # Adds noise uniformly across timesteps and was used in the original DDPM, 
+    # but degrades signal too quickly for large T.
     return torch.linspace(beta_start, beta_end, timesteps)
 
 
@@ -18,6 +20,8 @@ def cosine_beta_schedule(timesteps, s=0.008):
     cosine schedule as proposed in https://arxiv.org/abs/2102.09672
     """
     # TODO (2.3): Implement cosine beta/variance schedule as discussed in the paper mentioned above
+    # Defines cumulative signal decay using a cosine function, 
+    # preserving structure longer and yielding better sample quality and stability.
     steps = timesteps + 1
     x = torch.linspace(0, timesteps, steps)
     alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
@@ -31,6 +35,9 @@ def sigmoid_beta_schedule(beta_start, beta_end, timesteps):
     """
     sigmoidal beta schedule - following a sigmoid function
     """
+    # Adds noise slowly at first, rapidly in the middle, and saturates at the end, 
+    # providing a smooth but heuristic alternative schedule.
+    
     # TODO (2.3): Implement a sigmoidal beta schedule. Note: identify suitable limits of where you want to sample the sigmoid function.
     # Note that it saturates fairly fast for values -x << 0 << +x
     x = torch.linspace(-6, 6, timesteps)
@@ -64,26 +71,33 @@ class Diffusion:
         self.betas = self.betas.to(self.device)
 
 
-        # define alphas
+        # Precompute diffusion schedule parameters
+        # α_t = 1 - β_t (amount of signal retained at each step)
         self.alphas = 1.0 - self.betas
+        
+        # ᾱ_t = ∏_{i=1}^t α_i (cumulative product of alphas)
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+        
+        # ᾱ_{t-1} (shifted cumulative product, padded with 1.0 at t=0)
         self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
 
-        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
+        # Forward process coefficients: q(x_t | x_0) = N(x_t; √ᾱ_t x_0, (1-ᾱ_t)I)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)  # √ᾱ_t
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)  # √(1-ᾱ_t)
         
+        # Reverse process coefficient: 1/√α_t (used in denoising step)
         self.sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
         
+        # Posterior variance: β̃_t = (1-ᾱ_{t-1})/(1-ᾱ_t) · β_t
+        # Variance for q(x_{t-1} | x_t, x_0)
         self.posterior_variance = (
             self.betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         )
-        
-        # calculations for diffusion q(x_t | x_{t-1}) and others
-        # These are already computed above:
-        # - sqrt_alphas_cumprod and sqrt_one_minus_alphas_cumprod for forward process
 
-        # calculations for posterior q(x_{t-1} | x_t, x_0)
-        # Coefficients for computing the mean of q(x_{t-1} | x_t, x_0)
+        # Posterior mean coefficients for q(x_{t-1} | x_t, x_0)
+        # Alternative formulation (not used): μ̃_t(x_t, x_0) = coef1 · x_0 + coef2 · x_t
+        # Usage: posterior_mean = coef1 * predicted_x0 + coef2 * x_t
+        # where predicted_x0 = (x_t - √(1-ᾱ_t) * ε_θ) / √ᾱ_t
         self.posterior_mean_coef1 = (
             self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         )
@@ -168,9 +182,15 @@ class Diffusion:
         if noise is None:
             noise = torch.randn_like(x_zero)
 
+        # Extract noise schedule values for the given timesteps t
+        # These values are broadcasted to match the batch dimensions of x_zero
         sqrt_alphas_cumprod_t = extract(self.sqrt_alphas_cumprod, t, x_zero.shape)
         sqrt_one_minus_alphas_cumprod_t = extract(self.sqrt_one_minus_alphas_cumprod, t, x_zero.shape)
 
+        # Mathematical equation: x_t = √(ᾱ_t) * x_0 + √(1 - ᾱ_t) * ε
+        # where ᾱ_t is the cumulative product of alphas up to timestep t
+        # and ε is the noise sampled from N(0, I)
+        # Efficiently adds noise to x_0 to get x_t at any timestep t in one step
         return sqrt_alphas_cumprod_t * x_zero + sqrt_one_minus_alphas_cumprod_t * noise
 
     def p_losses(self, denoise_model, x_zero, t, noise=None, loss_type="l1", classes=None):
